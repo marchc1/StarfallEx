@@ -184,15 +184,18 @@ end
 
 -- Cleanup wrapped entity when it's removed
 SF.WrappedEntities = SF.EntityTable("SFWrappedEnts", function(ent)
-	for inst in pairs(SF.allInstances) do
-		for _, meta in ipairs(inst.entityMetas) do
-			local wrap = meta.sensitive2sf[ent]
-			if wrap then
-				meta.sensitive2sf[ent] = nil
-				meta.sf2sensitive[wrap] = nil
+	-- Wait a frame so we don't conflict with sf EntityRemoved hook
+	timer.Simple(0, function()
+		for inst in pairs(SF.allInstances) do
+			for _, meta in ipairs(inst.entityMetas) do
+				local wrap = meta.sensitive2sf[ent]
+				if wrap then
+					meta.sensitive2sf[ent] = nil
+					meta.sf2sensitive[wrap] = nil
+				end
 			end
 		end
-	end
+	end)
 end)
 
 function SF.Instance:CreateWrapper(metatable, typedata)

@@ -42,7 +42,7 @@ SF.RegisterLibrary("hologram")
 -- @name Hologram
 -- @class type
 -- @libtbl hologram_methods
-SF.RegisterType("Hologram", true, false, nil, "Entity")
+SF.RegisterType("Hologram", "entity", nil, nil, "Entity")
 
 
 

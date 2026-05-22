@@ -134,6 +134,59 @@ end
 -- Declare Basic Starfall Types
 -------------------------------------------------------------------------------
 
+SF.RingQueue = {
+	__index = {
+		push = function(self, item)
+			if self.writei%self.size + 1 == self.readi then self:grow() end
+			self[self.writei] = item
+			self.writei = self.writei%self.size + 1
+		end,
+		pop = function(self)
+			if self.readi == self.writei then return nil end
+			local ret = self[self.readi]
+			self[self.readi] = nil
+			self.readi = self.readi%self.size + 1
+			return ret
+		end,
+		isEmpty = function(self)
+			return self.readi == self.writei
+		end,
+		front = function(self)
+			return self[self.readi]
+		end,
+		grow = function(self)
+			if self.writei < self.size then
+				for i=self.writei+1, self.size do
+					self[i + self.size] = self[i]
+					self[i] = nil
+				end
+				self.readi = self.readi + self.size
+			end
+			self.size = self.size*2
+		end,
+	},
+	__call = function(t, size)
+		return setmetatable({readi = 1, writei = 1, size = size}, t)
+	end
+}
+setmetatable(SF.RingQueue, SF.RingQueue)
+
+function SF.CvarCallback(cvar, callback, typename, dontInit)
+	local converter
+	if typename=="number" then
+		converter = function(x) return tonumber(x) or tonumber(cvar:GetDefault()) end
+	elseif typename=="string" then
+		converter = function(x) return x end
+	elseif typename=="boolean" then
+		converter = function(x) return tobool(x) end
+	else
+		error("Unsupported type!")
+	end
+	cvars.RemoveChangeCallback(cvar:GetName(), "sf")
+	cvars.AddChangeCallback(cvar:GetName(), function(_,_,val) callback(converter(val)) end, "sf")
+	if not dontInit then callback(converter(cvar:GetString())) end
+end
+
 -- Returns a class that manages a table of entity keys
 function SF.EntityTable(key, destructor, dontwait)
 	return setmetatable({}, {
@@ -231,14 +284,10 @@ SF.BurstObject = {
 		}
 
 		local ratename = "sf_"..cvarname.."_burstrate"..(CLIENT and "_cl" or "")
-		local ratecvar = CreateConVar(ratename, tostring(rate), FCVAR_ARCHIVE, ratehelp)
-		t.rate = ratecvar:GetFloat()*scale
-		cvars.AddChangeCallback(ratename, function() t.rate = ratecvar:GetFloat()*scale end)
+		SF.CvarCallback(CreateConVar(ratename, tostring(rate), FCVAR_ARCHIVE, ratehelp), function(val) t.rate = val*scale end, "number")
 
 		local maxname = "sf_"..cvarname.."_burstmax"..(CLIENT and "_cl" or "")
-		local maxcvar = CreateConVar(maxname, tostring(max), FCVAR_ARCHIVE, maxhelp)
-		t.max = maxcvar:GetFloat()*scale
-		cvars.AddChangeCallback(maxname, function() t.max = maxcvar:GetFloat()*scale end)
+		SF.CvarCallback(CreateConVar(maxname, tostring(max), FCVAR_ARCHIVE, maxhelp), function(val) t.max = val*scale end, "number")
 
 		return setmetatable(t, p)
 	end
@@ -299,16 +348,10 @@ SF.LimitObject = {
 			counters = SF.EntityTable("limit"..cvarname)
 		}
 		getmetatable(t.counters).__index = function(t,k) t[k]=0 return 0 end
-
-		local maxname = "sf_"..cvarname.."_max"..(CLIENT and "_cl" or "")
-		local maxcvar = CreateConVar(maxname, tostring(max), FCVAR_ARCHIVE, maxhelp)
+		
 		scale = scale or 1
-		local function calcMax()
-			t.max = maxcvar:GetFloat()*scale
-			if t.max<0 then t.max = math.huge end
-		end
-		calcMax()
-		cvars.AddChangeCallback(maxname, calcMax)
+		local maxname = "sf_"..cvarname.."_max"..(CLIENT and "_cl" or "")
+		SF.CvarCallback(CreateConVar(maxname, tostring(max), FCVAR_ARCHIVE, maxhelp), function(val) t.max = val*scale if t.max<0 then t.max = math.huge end end, "number")
 
 		return setmetatable(t, p)
 	end
@@ -989,34 +1032,33 @@ SF.HttpTextureLoader = {
 			Panel.OnFinishLoadingDocument = function() self:nextRequest() end
 			self.Panel = Panel
 
-			self.queue[1] = request
+			self.queue:push(request)
 			self.request = self.request_postInit
 		end,
 		
 		request_postInit = function(self, request)
-			local len = #self.queue
-			self.queue[len + 1] = request
-			if len==0 then timer.Simple(0, function() self:nextRequest() end) end
+			self.queue:push(request)
+			if request == self.queue:front() then self:nextRequest() end
 		end,
 
 		nextRequest = function(self)
-			local request = self.queue[1]
-			request:load(self)
-			timer.Create(self.timeoutstr, 10, 1, function() request:destroy() end)
-		end,
-
-		pop = function(self)
-			table.remove(self.queue, 1)
-			if #self.queue > 0 then
-				self:nextRequest()
+			local nextRequest = self.queue:front()
+			if nextRequest then
+				timer.Simple(0, function() nextRequest:load(self) end)
+				timer.Create(self.timeoutstr, 10, 1, function() nextRequest:destroy() end)
 			else
 				timer.Remove(self.timeoutstr)
 			end
-		end
+		end,
+
+		pop = function(self)
+			self.queue:pop()
+			self:nextRequest()
+		end,
 	},
 	__call = function(p)
 		local ret = setmetatable({
-			queue = {},
+			queue = SF.RingQueue(128),
 		}, p)
 		ret.request = ret.initialize
 		ret.timeoutstr = "SF_URLTextureTimeout"..string.format("%p",ret)
@@ -1212,7 +1254,7 @@ do
 	-- Takes values returned from starfall hook and returns what should be passed to the gmod hook
 	-- @param gmoverride Whether this hook should override the gamemode function (makes the hook run last, but adds a little overhead)
 	function SF.hookAdd(realname, hookname, customargfunc, customretfunc, gmoverride)
-		hookname = hookname or realname:lower()
+		hookname = (hookname or realname):lower()
 		registered_instances[hookname] = {}
 		if gmoverride then
 			local hookfunc = getHookFunc(registered_instances[hookname], hookname, customargfunc, customretfunc)
@@ -1325,28 +1367,18 @@ function SF.SteamIDConcommand(name, callback, helptext, findplayer, completionli
 end
 
 --- Require .dll but doesn't throw an error. Returns true if success or false if fail.
-function SF.Require(moduleName)
-	local realmPrefix = SERVER and "sv" or "cl"
-	local osSuffix
-	if system.IsWindows() then
-		osSuffix = (jit.arch~="x64" and "win32" or "win64")
-	elseif system.IsLinux() then
-		osSuffix = (jit.arch~="x64" and "linux" or "linux64")
-	elseif system.IsOSX() then 
-		osSuffix = (jit.arch~="x64" and "osx" or "osx64")
-	else
-		error("couldn't determine system type?")
-	end
+function SF.Require(name)
+	if util.IsBinaryModuleInstalled(name) then
+		local ok, err = pcall(require, name)
 
-	if file.Exists("lua/bin/gm"..realmPrefix.."_"..moduleName.."_"..osSuffix..".dll", "GAME") then
-		local ok, err = pcall(require, moduleName)
 		if ok then
 			return true
 		else
-			ErrorNoHalt(err)
+			ErrorNoHalt(err .. "\n")
 			return false
 		end
 	end
+
 	return false
 end
 
@@ -2571,7 +2603,12 @@ do
 						a[i] = meta..method
 						b[i] = metatbl.."."..method
 					end
-					print("local " .. table.concat(a, ",") .. " = " .. table.concat(b, ","))
+					local output = "local " .. table.concat(a, ",") .. " = " .. table.concat(b, ",")
+					-- To deal with the console max buffer
+					for i=1, #output, 2048 do
+						Msg(string.sub(output, i, i+2048-1))
+					end
+					Msg("\n")
 				end
 			end)
 		end

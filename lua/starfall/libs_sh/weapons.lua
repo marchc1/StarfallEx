@@ -9,7 +9,7 @@ local WEP_META = FindMetaTable("Weapon")
 -- @class type
 -- @libtbl weapon_methods
 -- @libtbl weapon_meta
-SF.RegisterType("Weapon", false, true, WEP_META, "Entity")
+SF.RegisterType("Weapon", "entity", nil, WEP_META, "Entity")
 
 
 return function(instance)
@@ -145,7 +145,7 @@ if CLIENT then
 	-- @client
 	-- @return string Display name of weapon
 	function weapon_methods:getPrintName()
-		return Wep_GetPrintName(getwep(self))
+		return language.GetPhrase(Wep_GetPrintName(getwep(self)))
 	end
 
 	--- Returns if the weapon is carried by the local player.

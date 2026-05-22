@@ -109,8 +109,9 @@ builtins_library.tostring = tostring
 --- Attempts to convert the value to a number.
 -- @name builtins_library.tonumber
 -- @class function
--- @param any obj Object to turn into a number
--- @return number? The object as a number or nil if it couldn't be converted
+-- @param any value Either a string or a number to convert into a number.
+-- @param number? base The numerical base of the digits in the string. Must be between 2 and 36. Default is 10.
+-- @return number? The number representation of the input value or nil if it couldn't be converted.
 builtins_library.tonumber = tonumber
 
 --- Returns an iterator function for a for loop, to return ordered key-value pairs from a table.
@@ -244,25 +245,25 @@ builtins_library.isFirstTimePredicted = IsFirstTimePredicted
 -- If used on screens, will show 0 if only rendering is done. Operations must be done in the Think loop for them to be counted.
 -- @return number Current cpu time used this Think
 function builtins_library.cpuUsed()
-	return instance.cpu_total
+	return instance.perf.cpuTotal
 end
 
 --- Gets the Average CPU Time in the buffer
 -- @return number Average CPU Time of the buffer.
 function builtins_library.cpuAverage()
-	return instance:movingCPUAverage()
+	return instance.perf:getAverageCpu()
 end
 
 --- Gets the current ram usage of the gmod lua environment
+-- @name builtins_library.ramUsed
+-- @class function
 -- @return number The ram used in kilobytes
-function builtins_library.ramUsed()
-	return SF.Instance.Ram
-end
+builtins_library.ramUsed = gcinfo
 
 --- Gets the moving average of ram usage of the gmod lua environment
 -- @return number The ram used in kilobytes
 function builtins_library.ramAverage()
-	return SF.Instance.RamAvg
+	return instance.perf:getAverageRam()
 end
 
 --- Gets the max allowed ram usage of the gmod lua environment
@@ -286,7 +287,7 @@ end
 function builtins_library.cpuTotalUsed()
 	local total = 0
 	for instance, _ in pairs(SF.playerInstances[instance.player]) do
-		total = total + instance.cpu_total
+		total = total + instance.perf.cpuTotal
 	end
 	return total
 end
@@ -296,7 +297,7 @@ end
 function builtins_library.cpuTotalAverage()
 	local total = 0
 	for instance, _ in pairs(SF.playerInstances[instance.player]) do
-		total = total + instance:movingCPUAverage()
+		total = total + instance.perf:getAverageCpu()
 	end
 	return total
 end
@@ -305,14 +306,14 @@ end
 -- CPU Time is stored in a buffer of N elements, if the average of this exceeds cpuMax, the chip will error.
 -- @return number Max SysTime allowed to take for execution of the chip in a Think.
 function builtins_library.cpuMax()
-	return instance.cpuQuota
+	return instance.perf.cpuLimit
 end
 
 --- Sets a soft cpu quota which will trigger a catchable error if the cpu goes over a certain amount.
 -- @param number quota The threshold where the soft error will be thrown. Ratio of current cpu to the max cpu usage. 0.5 is 50%
 function builtins_library.setSoftQuota(quota)
 	checkluatype(quota, TYPE_NUMBER)
-	instance.cpu_softquota = math.Clamp(quota, 0, 1)
+	instance.perf.cpuSoftLimit = instance.perf.cpuLimit * math.Clamp(quota, 0, 1)
 end
 
 --- Checks if the chip is capable of performing an action.
@@ -538,6 +539,8 @@ local function argsToChat(...)
 	return processed, length, size
 end
 
+SF.argsToChat = argsToChat
+
 if SERVER then
 	local function sendPrintToPlayer(ply, data, console)
 		net.Start("starfall_print")
@@ -548,6 +551,8 @@ if SERVER then
 		end
 		net.Send(ply)
 	end
+
+	SF.sendPrintToPlayer = sendPrintToPlayer
 
 	--- Prints a message to the player's chat.
 	-- @shared
@@ -741,6 +746,7 @@ else
 	function builtins_library.concmd(cmd)
 		checkluatype(cmd, TYPE_STRING)
 		if instance.player ~= LocalPlayer() then SF.Throw("Can't run concmd on other players!", 2) end
+		if IsConCommandBlocked(cmd) then SF.Throw("Console command is blocked!", 2) end
 		LocalPlayer():ConCommand(cmd)
 	end
 
@@ -919,12 +925,6 @@ function builtins_library.dodir(path, loadpriority)
 	return returns
 end
 
--- Used for loadstring, setfenv, and getfenv.
-local whitelistedEnvs = setmetatable({
-	[instance.env] = true,
-}, {__mode = 'k'})
-instance.whitelistedEnvs = whitelistedEnvs
-
 --- Like Lua 5.2 or LuaJIT's load/loadstring, except it has no mode parameter and, of course, the resulting function is in your instance's environment by default.
 -- For compatibility with older versions of Starfall, loadstring is NOT an alias of this function like it is in vanilla Lua 5.2/LuaJIT.
 -- @param string code String to compile
@@ -932,37 +932,24 @@ instance.whitelistedEnvs = whitelistedEnvs
 -- @param table? env Environment of compiled function
 -- @return function? Compiled function, or nil if failed to compile
 -- @return string? Error string, or nil if successfully compiled
-function builtins_library.loadstring(ld, source, mode, env)
+function builtins_library.loadstring(ld, source)
 	checkluatype(ld, TYPE_STRING)
 	if source == nil then
 		source = "=(load)"
 	else
 		checkluatype(source, TYPE_STRING)
 	end
-	if not isstring(mode) then
-		mode, env = nil, mode
-	end
-	if env == nil then
-		env = instance.env
-	else
-		checkluatype(env, TYPE_TABLE)
-	end
 	source = "SF:"..source
 	local retval = SF.CompileString(ld, source, false)
 	if isfunction(retval) then
-		whitelistedEnvs[env] = true
-		return setfenv(retval, env)
+		return setfenv(retval, instance.env)
 	end
 	return nil, tostring(retval)
 end
 builtins_library.load = builtins_library.loadstring
 
---- Lua's setfenv
--- Sets the environment of either the stack level or the function specified.
--- Note that this function will throw an error if you try to use it on anything outside of your sandbox.
--- @param function|number funcOrStackLevel Function or stack level to set the environment of
--- @param table tbl New environment
--- @return function Function with environment set to tbl
+--[[ High security risk functions that add very little value. Don't add again.
+
 function builtins_library.setfenv(location, environment)
 	if location == nil then
 		location = 2
@@ -978,11 +965,6 @@ function builtins_library.setfenv(location, environment)
 	SF.Throw("cannot change environment of given object", 2)
 end
 
---- Lua's getfenv
--- Returns the environment of either the stack level or the function specified.
--- Note that this function will return nil if the return value would be anything other than builtins_library or an environment you have passed to setfenv.
--- @param function|number funcOrStackLevel Function or stack level to get the environment of
--- @return table? Environment table (or nil, if restricted)
 function builtins_library.getfenv(location)
 	if location == nil then
 		location = 2
@@ -996,6 +978,8 @@ function builtins_library.getfenv(location)
 		return fenv
 	end
 end
+
+]]
 
 --- Gets an SF type's methods table
 -- @param string sfType Name of SF type

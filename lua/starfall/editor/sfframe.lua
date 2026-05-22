@@ -106,7 +106,7 @@ function SF.DefaultCode()
 end
 
 cvars.AddChangeCallback("sf_editor_layout", function()
-	RunConsoleCommand("sf_editor_restart")
+	timer.Simple(0, function() RunConsoleCommand("sf_editor_restart") end)
 end)
 
 Editor.CreatedFonts = {}
@@ -176,11 +176,8 @@ function Editor:Init()
 	self.Components = {}
 
 	-- Controls the auto reload functionality
-	self.autoReloadEnabled = Editor.EditorFileAutoReload:GetBool()
-	self.autoReloadInterval = Editor.EditorFileAutoReloadInterval:GetFloat()
-	cvars.AddChangeCallback(Editor.EditorFileAutoReload:GetName(), function() self:setFileAutoReload(Editor.EditorFileAutoReload:GetBool()) end)
-	cvars.AddChangeCallback(Editor.EditorFileAutoReloadInterval:GetName(), function() self:setFileAutoReloadInterval(Editor.EditorFileAutoReloadInterval:GetFloat()) end)
-
+	SF.CvarCallback(Editor.EditorFileAutoReloadInterval, function(val) self:setFileAutoReloadInterval(val) end, "number")
+	SF.CvarCallback(Editor.EditorFileAutoReload, function(val) self:setFileAutoReload(val) end, "boolean")
 
 	-- Load border colors, position, & size
 	self:LoadEditorSettings()
@@ -204,11 +201,6 @@ function Editor:Init()
 	self:SetV(false)
 
 	self:InitShutdownHook()
-
-	-- This should create the timers
-	if self.EditorFileAutoReload then
-		self:setFileAutoReload(true)
-	end
 end
 
 local size = CreateClientConVar("sf_editor_size", "800_600", true, false)
@@ -456,7 +448,7 @@ function Editor:GetLastTab() return self.LastTab end
 
 function Editor:SetLastTab(Tab) self.LastTab = Tab end
 
-function Editor:GetActiveTab() 
+function Editor:GetActiveTab()
 	local tab = self.C.TabHolder:GetActiveTab()
 	if tab then return tab end
 	self:CreateTab()
@@ -2026,8 +2018,8 @@ function PANEL:UpdatePlayers(players)
 			local svtotal = 0
 			local cltotal = 0
 			for instance, _ in pairs(SF.playerInstances[ply]) do
-				svtotal = svtotal + (instance.entity:IsValid() and instance.entity:GetNWInt("CPUus") or 0)
-				cltotal = cltotal + instance.cpu_average
+				svtotal = svtotal + (instance.entity:IsValid() and instance.entity:GetCPUus("CPUus") or 0)
+				cltotal = cltotal + instance.perf.cpuAverage
 			end
 			cpuServerText:SetText(string.format("SV CPU: %3.1f us", svtotal))
 			cpuClientText:SetText(string.format("CL CPU: %3.1f us", cltotal*1e6))

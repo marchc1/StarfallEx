@@ -1437,7 +1437,7 @@ function SF.ThrowTypeError(expected, got, level, msg)
 	SF.Throw((msg and #msg>0 and (msg .. " ") or "") .. "Type mismatch (Expected " .. expected .. ", got " .. got .. ") in function " .. funcname, level)
 end
 
---- Lookup table of TYPE > name
+--- Lookup table of TYPE > name, https://wiki.facepunch.com/gmod/Enums/TYPE
 SF.TYPENAME = {
 	[TYPE_NONE]             = "Invalid type",
 	[TYPE_NIL]              = "nil",
@@ -1457,7 +1457,9 @@ SF.TYPENAME = {
 	[TYPE_RESTORE]          = "IRestore",
 	[TYPE_DAMAGEINFO]       = "CTakeDamageInfo",
 	[TYPE_EFFECTDATA]       = "CEffectData",
-	[TYPE_RECIPIENTFILTER]  = "CUserCmd",
+	[TYPE_MOVEDATA]         = "CMoveData",
+	[TYPE_RECIPIENTFILTER]  = "CRecipientFilter",
+	[TYPE_USERCMD]          = "CUserCmd",
 	[TYPE_SCRIPTEDVEHICLE]  = "ScriptedVehicle", -- Depricated, also TYPE Enum doesnt specify the name so this it is
 	[TYPE_MATERIAL]         = "IMaterial",
 	[TYPE_PANEL]            = "Panel",
@@ -2438,9 +2440,21 @@ do
 	string_library.toMinutesSeconds = string.ToMinutesSeconds string_library.ToMinutesSeconds = string.ToMinutesSeconds
 	string_library.toMinutesSecondsMilliseconds = string.ToMinutesSecondsMilliseconds string_library.ToMinutesSecondsMilliseconds = string.ToMinutesSecondsMilliseconds
 	string_library.toTable = string.ToTable string_library.ToTable = string.ToTable
-	string_library.trim = string.Trim string_library.Trim = string.Trim
-	string_library.trimLeft = string.TrimLeft string_library.TrimLeft = string.TrimLeft
-	string_library.trimRight = string.TrimRight string_library.TrimRight = string.TrimRight
+	function string_library.trim(str, c)
+		checkregex(str, ".*.-.*")
+		return string.Trim(str, c)
+	end
+	string_library.Trim = string_library.trim
+	function string_library.trimLeft(str, c)
+		checkregex(str, ".-.*")
+		return string.TrimLeft(str, c)
+	end
+	string_library.TrimLeft = string_library.trimLeft
+	function string_library.trimRight(str, c)
+		checkregex(str, ".*.+")
+		return string.TrimRight(str, c)
+	end
+	string_library.TrimRight = string_library.trimRight
 	string_library.upper = string.upper
 	string_library.normalizePath = SF.NormalizePath
 
